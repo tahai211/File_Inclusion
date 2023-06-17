@@ -47,7 +47,18 @@ stats["requests"] = 0
 stats["info"] = 0
 stats["vulns"] = 0
 stats["urls"] = 0
-
+banner_text = '''
+     ▀█████▄    ,████▌
+      ╙██████µ  █████                     ███████╗    ██╗     
+         ▀████▄ ████                      ██╔════╝    ██║   
+          ,▄▄█████▀                       █████╗      ██║   
+        ▄█▀████████C                      ██╔══╝      ██║   
+    ░  █████████████`                     ██║         ██║    
+      ░█████████████░                     ██║         ██║ 
+         ▀▀████████▀,                     ╚═╝         ╚═╝   
+         ▄,██▌▀▀▀▄▄ ▀        <<<<<<<< STARTING FILE INCLUSION >>>>>>>>       
+         ▐▀▀▀▌▀``
+    ''' + ']'
 # Add them from the most complex one to the least complex. This is important.
 TO_REPLACE = ["<IMG sRC=X onerror=jaVaScRipT:alert`xss`>", "<img src=x onerror=javascript:alert`xss`>",
               "%3CIMG%20sRC%3DX%20onerror%3DjaVaScRipT%3Aalert%60xss%60%3E",
@@ -886,37 +897,73 @@ def lfimap_cleanup():
 
 
 if (__name__ == "__main__"):
-
+    print(banner_text)
     parser = argparse.ArgumentParser(
         description=" Local File Inclusion discovery and exploitation tool", add_help=False)
 
     # Add arguments to the parser
-    # ...
 
+    parser.add_argument('-U', type=str, nargs='?', metavar='url', dest='url',
+                        help='\t\t Specify url, Ex: "http://example.org/vuln.php?param=PWN"')
+
+    parser.add_argument('-C', type=str, metavar='<cookie>', dest='cookie',
+                        help='\t\t Specify session cookie, Ex: "PHPSESSID=1943785348b45"')
+    parser.add_argument('-D', type=str, metavar='<data>',
+                        dest='postreq', help='\t\t Specify HTTP request form data')
+    parser.add_argument('-H', type=str, metavar='<header>', action='append', dest='httpheaders',
+                        help='\t\t Specify additional HTTP header(s). Ex: "X-Forwarded-For:127.0.0.1"')
+    parser.add_argument('-M', type=str, metavar='<method>', dest='method',
+                        help='\t\t Specify HTTP request method to use for testing')
+
+    parser.add_argument('--placeholder', type=str, metavar='<name>', dest='param',
+                        help='\t\t Specify different testing placeholder value (default "PWN")')
+    parser.add_argument('--delay', type=int, metavar='<milis>', dest='delay',
+                        help='\t\t Specify delay in miliseconds after each request')
+    parser.add_argument('--http-ok', type=int, action='append', metavar='<number>',
+                        dest='http_valid', help='\t\t Specify http response code(s) to treat as valid')
+    parser.add_argument('--no-stop', action='store_true', dest='no_stop',
+                        help='\t\t Don\'t stop using same method upon findings')
+    parser.add_argument('--lhost', type=str, metavar='<lhost>', dest='lhost',
+                        help='\t\t Specify local ip address for reverse connection')
+    parser.add_argument('-n', type=str, action='append', metavar='<U|B>', dest='encodings',
+                        help='\t\t Specify additional payload encoding(s). "U" for URL, "B" for base64')
+    parser.add_argument('-q', '--quick', action='store_true',
+                              dest='quick', help='\t\t Perform quick testing with few payloads')
+
+    parser.add_argument('--use-long', action='store_true', dest='uselong',
+                        help='\t\t Use "wordlists/long.txt" wordlist for truncation test modality')
+
+    parser.add_argument('--log', type=str, metavar='<file>', dest='log',
+                        help='\t\t Output all requests and responses to specified file')
+
+    parser.add_argument('-v', '--verbose', action='store_true', dest='verbose',
+                        help='\t\t Print more detailed output when performing attacks\n')
+    parser.add_argument('-h', '--help', action='help',
+                        default=argparse.SUPPRESS, help='\t\t Print this help message\n\n')
     # Parse the command-line arguments
     args = parser.parse_args()
-    args.url = "http://localhost:9991/FileInclusion/pages/lvl1.php?file=PWN"
-    #args.f = input("Enter URL file: ")
-    # Specify session cookie, Ex: "PHPSESSID=1943785348b45"'
-    args.cookie = "PHPSESSID=3bb8b36d307f1eceb4c8f4587bb436df"
-    # Chỉ định dữ liệu biểu mẫu yêu cầu HTTP
-    args.postreq = ""
-    # đường dẫn đến tệp ghi log
-    args.log = "/Users/tahai/Documents/Đang Học.../Chuyên đề cơ sở /File_Inclusion/FI/__pycache__/log.txt"
-    args.uselong = True   # or  False để dùng file dài hặc ngắn
-    args.verbose = ""  # In đầu ra chi tiết hơn khi thực hiện các cuộc tấn công
-    args.httpheaders = ""  # thêm vào cho header "X-Forwarded-For:127.0.0.1"
-    args.http_valid = ""  # có chỉ định url mẫu k mã các reponst 200,500,404
-    # Specify different testing placeholder value (default "PWN")'
-    args.param = "PWN"
-    args.delay = ""  # set delay mỗi request
-    args.no_stop = ""  # để dừng việc thực thi tiếp theo
-    args.method = "GET"
-    args.encodings = "U"  # U là base64
+    # args.url = "http://localhost:9991/FileInclusion/pages/lvl2.php?file=PWN"
+    # #args.f = input("Enter URL file: ")
+    # # Specify session cookie, Ex: "PHPSESSID=1943785348b45"'
+    # args.cookie = "PHPSESSID=3bb8b36d307f1eceb4c8f4587bb436df"
+    # # Chỉ định dữ liệu biểu mẫu yêu cầu HTTP
+    # args.postreq = ""
+    # # đường dẫn đến tệp ghi log
+    # args.log = "/Users/tahai/Documents/Đang Học.../Chuyên đề cơ sở /File_Inclusion/FI/__pycache__/log.txt"
+    # args.uselong = True   # or  False để dùng file dài hặc ngắn
+    # args.verbose = ""  # In đầu ra chi tiết hơn khi thực hiện các cuộc tấn công
+    # args.httpheaders = ""  # thêm vào cho header "X-Forwarded-For:127.0.0.1"
+    # args.http_valid = ""  # có chỉ định url mẫu k mã các reponst 200,500,404
+    # # Specify different testing placeholder value (default "PWN")'
+    # args.param = "PWN"
+    # args.delay = ""  # set delay mỗi request
+    # args.no_stop = ""  # để dừng việc thực thi tiếp theo
+    # args.method = "GET"
+    # args.encodings = "U"  # U là base64
+    # args.lhost = None
+    # args.quick = True
+
     url = args.url
-    args.lhost = None
-    args.quick = True
-    #urlfile = args.f
     truncWordlist = ""  # dùng file khác
 
     # Check if mandatory args are provided
@@ -928,7 +975,7 @@ if (__name__ == "__main__"):
         args.param = "PWN"
 
     # if '-D' is provided, set mode to post
-    elif (args.postreq):
+    if (args.postreq):
         if (args.param in args.postreq):
             mode = "post"
         else:
@@ -961,18 +1008,17 @@ if (__name__ == "__main__"):
         r'(?::\d+)?'  # optional port
         r'(?:/?|[/?]\S+)$', re.IGNORECASE)
 
-    if (mode != "file"):
-        # kiểm tra url có http và socks không k có thì thêm
-        if ("http" not in url and "socks" not in url):
-            if (args.verbose):
-                print("[i] No URL scheme provided. Defaulting to http.")
+    # kiểm tra url có http và socks không k có thì thêm
+    if ("http" not in url and "socks" not in url):
+        if (args.verbose):
+            print("[i] No URL scheme provided. Defaulting to http.")
 
-            args.url = "http://" + url
-            url = "http://" + url
+        args.url = "http://" + url
+        url = "http://" + url
 
-        if (re.match(urlRegex, url) is None):  # để kiểm tra xem url có khớp với mẫu URL hợp lệ hay không
-            print("[-] URL not valid, exiting...")
-            sys.exit(-1)
+    if (re.match(urlRegex, url) is None):  # để kiểm tra xem url có khớp với mẫu URL hợp lệ hay không
+        print("[-] URL not valid, exiting...")
+        sys.exit(-1)
 
     if (scriptDirectory == ""):  # nếu k lâý đc đường dẫn đêns tệp  tin
         separator = ""
